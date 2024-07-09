@@ -4,8 +4,8 @@ import json
 import pandas as pd
 
 def fetch_data(page_size, page_number):
-    base_url = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineDA"
-    #base_url = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineCDC"
+    #base_url = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineDA"
+    base_url = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineCDC"
     filters = json.dumps({"filters": {}})
 
     headers = {
@@ -96,15 +96,51 @@ def split_Into_Columns():
     df.to_csv('output.csv', index=False)
     #print(df)
 
+def filter_data(filename):
+    df = pd.read_csv(filename)
+    #print(df.head())
+    # Define the text filter pattern
+    pattern = 'child'
+
+    # Apply the filter
+    filtered_df = df[df['DevelopmentType'].str.contains(pattern, case=False, na=False)]
+    #print(filtered_df)
+    #filtered_df.to_csv('filterdata.csv', index=False)
+
+    # Assuming 'location' column contains structured text like "FullAddress: [address], PostCode: [code], State: [state], PlanLabel: [label]"
+    # Define regex pattern to extract values
+    # Adjust the regex based on the actual structure of your 'location' column
+    #pattern = r'FullAddress: (?P<FullAddress>[^,]+), PostCode: (?P<PostCode>\w+), State: (?P<State>\w+), PlanLabel: (?P<PlanLabel>[^\,]+)'    pattern = r''
+    FullAddresspattern = r'FullAddress(?P<FullAddress>.+?)(?=, \'StreetNumber1\')'
+    #FullAddresspattern = r'FullAddress(?P<FullAddress>[^,]+)'
+    PlanLabelpattern = r'PlanLabel(?P<PlanLabel>[^,]+)'
+    
+    # Extract values into new columns
+    df_extracted_FullAddress = filtered_df['location'].str.extract(FullAddresspattern)
+    # Assuming df_extracted_FullAddress is your DataFrame and 'FullAddress' is the column
+    df_extracted_FullAddress['FullAddress'] = df_extracted_FullAddress['FullAddress'].str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
+    print(df_extracted_FullAddress)
+    df_extracted_PlanLabel = filtered_df['location'].str.extract(PlanLabelpattern)
+    df_extracted_PlanLabel['PlanLabel'] = df_extracted_PlanLabel['PlanLabel'].str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
+    
+    #print(df_extracted_PlanLabel)
+
+    # Display the filtered DataFrame
+    # Merge the extracted data with the original DataFrame
+    filtered_df.drop(columns=['location'], inplace=True)
+    merged_df = pd.concat([filtered_df, df_extracted_FullAddress,df_extracted_PlanLabel], axis=1)
+    merged_df.to_csv('filterdata.csv', index=False) 
+
 def main():
     page_size = 1000
-    page_number = 1
+    page_number = 1388
     #page_number = 69085
     all_data = []
 
 
     while True:
         data = fetch_data(page_size, page_number)
+        #print(page_number)
         if not data:
             break
         try:
@@ -120,6 +156,7 @@ def main():
     try:
         write_to_csv(all_data)
         split_Into_Columns()
+        filter_data('online_DA.csv')
     except Exception as e:
         print(f"Failed to write data to CSV: {e}")
 
