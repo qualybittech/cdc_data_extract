@@ -1,11 +1,12 @@
+from functools import reduce
+import os
 import requests
 import csv
 import json
 import pandas as pd
 
-def fetch_data(page_size, page_number):
-    #base_url = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineDA"
-    base_url = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineCDC"
+def fetch_data(base_url,page_size, page_number):
+
     filters = json.dumps({"filters": {}})
 
     headers = {
@@ -70,7 +71,7 @@ def extract_data(data):
     #print(extracted)            
     return extracted
 
-def write_to_csv(data, filename="output.csv"):
+def write_to_csv(data, filename):
     with open(filename, mode='w', newline='', encoding='utf-8') as file:
         writer = csv.DictWriter(file, fieldnames=["PlanningPortalApplicationNumber","LodgementDate", 
                                                 "DeterminationDate","CostOfDevelopment",
@@ -96,21 +97,22 @@ def split_Into_Columns():
     df.to_csv('output.csv', index=False)
     #print(df)
 
-def filter_data(filename):
-    df = pd.read_csv(filename)
+def filter_data(inputfilename,outputfilename,search_patterns):
+    df = pd.read_csv(inputfilename)
     #print(df.head())
-    # Define the text filter pattern
-    pattern = 'child'
 
     # Apply the filter
-    filtered_df = df[df['DevelopmentType'].str.contains(pattern, case=False, na=False)]
+    #filtered_df = df[df['DevelopmentType'].str.contains(search_pattern, case=False, na=False)]
+    # Generate dynamic filter
+    conditions = [df['DevelopmentType'].str.contains(pattern, case=False, na=False) for pattern in search_patterns]
+    combined_condition = reduce(lambda x, y: x | y, conditions)
+    filtered_df = df[combined_condition]
     #print(filtered_df)
     #filtered_df.to_csv('filterdata.csv', index=False)
 
     # Assuming 'location' column contains structured text like "FullAddress: [address], PostCode: [code], State: [state], PlanLabel: [label]"
     # Define regex pattern to extract values
     # Adjust the regex based on the actual structure of your 'location' column
-    #pattern = r'FullAddress: (?P<FullAddress>[^,]+), PostCode: (?P<PostCode>\w+), State: (?P<State>\w+), PlanLabel: (?P<PlanLabel>[^\,]+)'    pattern = r''
     FullAddresspattern = r'FullAddress(?P<FullAddress>.+?)(?=, \'StreetNumber1\')'
     #FullAddresspattern = r'FullAddress(?P<FullAddress>[^,]+)'
     PlanLabelpattern = r'PlanLabel(?P<PlanLabel>[^,]+)'
@@ -129,17 +131,25 @@ def filter_data(filename):
     # Merge the extracted data with the original DataFrame
     filtered_df.drop(columns=['location'], inplace=True)
     merged_df = pd.concat([filtered_df, df_extracted_FullAddress,df_extracted_PlanLabel], axis=1)
-    merged_df.to_csv('filterdata.csv', index=False) 
+    merged_df.to_csv(outputfilename, index=False) 
 
-def main():
-    page_size = 1000
-    page_number = 1388
-    #page_number = 69085
+def merge_data(filter_output_file_DA,filter_output_file_CDC,merge_output_file):
+     # Read the CSV files
+    df_DA = pd.read_csv(filter_output_file_DA)
+    df_CDC = pd.read_csv(filter_output_file_CDC)
+
+    # Merge the DataFrames
+    # Assuming you want to concatenate them vertically (one after the other)
+    # If you need a different kind of merge, adjust accordingly
+    merged_df = pd.concat([df_DA, df_CDC], ignore_index=True)
+
+    # Save the merged DataFrame to a new CSV file
+    merged_df.to_csv(merge_output_file, index=False)
+
+def process_data(base_url, page_size, page_number,source_output_file):
     all_data = []
-
-
     while True:
-        data = fetch_data(page_size, page_number)
+        data = fetch_data(base_url,page_size, page_number)
         #print(page_number)
         if not data:
             break
@@ -154,11 +164,39 @@ def main():
         page_number += 1
         print(page_number)
     try:
-        write_to_csv(all_data)
-        split_Into_Columns()
-        filter_data('online_DA.csv')
+        write_to_csv(all_data, source_output_file)
+        #split_Into_Columns()
     except Exception as e:
         print(f"Failed to write data to CSV: {e}")
+
+def main():
+    page_size = 10000
+    page_number = 1
+    #page_number = 69085
+    all_data = []
+    base_url_onlineDA = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineDA"
+    base_url_onlineCDC = "https://api.apps1.nsw.gov.au/eplanning/data/v0/OnlineCDC"
+    output_file_DA = 'outputDA.csv'
+    output_file_CDC = 'outputCDC.csv'
+    filter_output_file_DA = 'filteroutputDA.csv'
+    filter_output_file_CDC = 'filteroutputCDC.csv'
+    merge_output_file = 'childcenters.csv'
+    #search_pattern = 'child'
+    search_patterns = ["childcare", "child care", "daycare", "day care", "early learning", "preschool"]  # Add more patterns as needed
+
+    #data extracted for both DA and CDC
+    process_data(base_url_onlineDA, page_size, page_number,output_file_DA)
+    filter_data(output_file_DA,filter_output_file_DA,search_patterns)
+
+    process_data(base_url_onlineCDC, page_size, page_number,output_file_CDC)
+    filter_data(output_file_CDC,filter_output_file_CDC,search_patterns)
+
+    #Merge both the data DA and CDC files
+    merge_data(filter_output_file_DA,filter_output_file_CDC,merge_output_file)
+    
+    #Remove the addtional file
+    os.remove(filter_output_file_DA)
+    os.remove(filter_output_file_CDC)
 
 if __name__ == "__main__":
     main()
