@@ -1,5 +1,6 @@
 from functools import reduce
 import os
+import re
 import requests
 import csv
 import json
@@ -97,18 +98,29 @@ def split_Into_Columns():
     df.to_csv('output.csv', index=False)
     #print(df)
 
-def filter_data(inputfilename,outputfilename,search_patterns):
+def filter_data(inputfilename,outputfilename,search_patterns_development_type,search_patterns_location):
     df = pd.read_csv(inputfilename)
     #print(df.head())
 
     # Apply the filter
-    #filtered_df = df[df['DevelopmentType'].str.contains(search_pattern, case=False, na=False)]
+    #filtered_df = df[df['DevelopmentType'].str.contains(search_patterns_development_type, case=False, na=False)]
     # Generate dynamic filter
-    conditions = [df['DevelopmentType'].str.contains(pattern, case=False, na=False) for pattern in search_patterns]
+    conditions = [df['DevelopmentType'].str.contains(pattern, case=False, na=False) for pattern in search_patterns_development_type]
     combined_condition = reduce(lambda x, y: x | y, conditions)
-    filtered_df = df[combined_condition]
+    # Ensure the boolean Series has the same index as the DataFrame
+    combined_condition = combined_condition.reindex(df.index)
+    filtered_df2 = df[combined_condition]
     #print(filtered_df)
-    #filtered_df.to_csv('filterdata.csv', index=False)
+    filtered_df2.to_csv('filterdevdata.csv', index=False)
+
+    if(search_patterns_location == []):
+        filtered_df = filtered_df2
+    else:
+        df2 = pd.read_csv('filterdevdata.csv')
+        combined_pattern = '|'.join(search_patterns_location)
+        filtered_df = df2.query('location.str.contains(@combined_pattern, case=False, na=False)')    
+        #print(filtered_df)
+        filtered_df.to_csv('filterlocdata.csv', index=False)
 
     # Assuming 'location' column contains structured text like "FullAddress: [address], PostCode: [code], State: [state], PlanLabel: [label]"
     # Define regex pattern to extract values
@@ -121,7 +133,7 @@ def filter_data(inputfilename,outputfilename,search_patterns):
     df_extracted_FullAddress = filtered_df['location'].str.extract(FullAddresspattern)
     # Assuming df_extracted_FullAddress is your DataFrame and 'FullAddress' is the column
     df_extracted_FullAddress['FullAddress'] = df_extracted_FullAddress['FullAddress'].str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
-    print(df_extracted_FullAddress)
+    #print(df_extracted_FullAddress)
     df_extracted_PlanLabel = filtered_df['location'].str.extract(PlanLabelpattern)
     df_extracted_PlanLabel['PlanLabel'] = df_extracted_PlanLabel['PlanLabel'].str.replace(r'[^a-zA-Z0-9\s]', '', regex=True)
     
@@ -169,6 +181,26 @@ def process_data(base_url, page_size, page_number,source_output_file):
     except Exception as e:
         print(f"Failed to write data to CSV: {e}")
 
+def read_input_txt_data(inputfilename):
+     # Read the contents of the file
+    with open('inputs.txt', 'r') as file:
+        content = file.read()
+
+    # Extract the values using regular expressions
+    development_type_match = re.search(r'search_patterns_development_type\s*=\s*(.*)', content)
+    location_match = re.search(r'search_patterns_location\s*=\s*(.*)', content)
+
+    # Convert the extracted strings into lists
+    if development_type_match and location_match:
+        search_patterns_development_type = eval(development_type_match.group(1))
+        search_patterns_location = eval(location_match.group(1))
+
+        print("Development Types:", search_patterns_development_type)
+        print("Locations:", search_patterns_location)
+    else:
+        print("Patterns not found in the file.")
+    return search_patterns_development_type,search_patterns_location
+
 def main():
     page_size = 10000
     page_number = 1
@@ -182,14 +214,16 @@ def main():
     filter_output_file_CDC = 'filteroutputCDC.csv'
     merge_output_file = 'childcenters.csv'
     #search_pattern = 'child'
-    search_patterns = ["childcare", "child care", "daycare", "day care", "early learning", "preschool"]  # Add more patterns as needed
+    search_patterns_development_type, search_patterns_location= read_input_txt_data("inputs.txt")
+    #search_patterns_development_type = ["childcare", "child care", "daycare", "day care", "early learning", "preschool","Others"]  # Add more patterns as needed
+    #search_patterns_location = ["2207","2170","2142"]  # Add more patterns as needed
 
     #data extracted for both DA and CDC
     process_data(base_url_onlineDA, page_size, page_number,output_file_DA)
-    filter_data(output_file_DA,filter_output_file_DA,search_patterns)
+    filter_data(output_file_DA,filter_output_file_DA,search_patterns_development_type,search_patterns_location)
 
     process_data(base_url_onlineCDC, page_size, page_number,output_file_CDC)
-    filter_data(output_file_CDC,filter_output_file_CDC,search_patterns)
+    filter_data(output_file_CDC,filter_output_file_CDC,search_patterns_development_type,search_patterns_location)
 
     #Merge both the data DA and CDC files
     merge_data(filter_output_file_DA,filter_output_file_CDC,merge_output_file)

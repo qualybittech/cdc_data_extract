@@ -1,0 +1,2 @@
+search_patterns_development_type = "childcare", "child care", "daycare", "day care", "early learning", "preschool","Others"
+search_patterns_location = "2207","2170","2142"
